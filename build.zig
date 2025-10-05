@@ -17,16 +17,19 @@ pub fn build(b: *std.Build) !void {
     const use_double_precision = b.option(bool, "double", "All data will be stored as double values") orelse false;
     const assimp = b.dependency("assimp", .{});
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "assimp",
-        .optimize = optimize,
-        .target = target,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+        .linkage = .static,
     });
 
     if (target.result.os.tag == .windows) {
-        lib.defineCMacro("_WINDOWS", null);
-        lib.defineCMacro("_WIN32", null);
-        lib.defineCMacro("OPENDDL_STATIC_LIBARY", null);
+        lib.root_module.addCMacro("_WINDOWS", "");
+        lib.root_module.addCMacro("_WIN32", "");
+        lib.root_module.addCMacro("OPENDDL_STATIC_LIBARY", "");
     }
 
     lib.linkLibC();
@@ -41,20 +44,20 @@ pub fn build(b: *std.Build) !void {
         },
         .{ .ASSIMP_DOUBLE_PRECISION = use_double_precision },
     );
-    lib.addConfigHeader(config_h);
-    lib.addIncludePath(assimp.path("include"));
-    lib.addIncludePath(lazy_from_path("include", b));
+    lib.root_module.addConfigHeader(config_h);
+    lib.root_module.addIncludePath(assimp.path("include"));
+    lib.root_module.addIncludePath(lazy_from_path("include", b));
 
-    lib.addIncludePath(assimp.path(""));
-    lib.addIncludePath(assimp.path("contrib"));
-    lib.addIncludePath(assimp.path("code"));
-    lib.addIncludePath(assimp.path("contrib/pugixml/src/"));
-    lib.addIncludePath(assimp.path("contrib/rapidjson/include"));
-    lib.addIncludePath(assimp.path("contrib/unzip"));
-    lib.addIncludePath(assimp.path("contrib/zlib"));
-    lib.addIncludePath(assimp.path("contrib/openddlparser/include"));
+    lib.root_module.addIncludePath(assimp.path(""));
+    lib.root_module.addIncludePath(assimp.path("contrib"));
+    lib.root_module.addIncludePath(assimp.path("code"));
+    lib.root_module.addIncludePath(assimp.path("contrib/pugixml/src/"));
+    lib.root_module.addIncludePath(assimp.path("contrib/rapidjson/include"));
+    lib.root_module.addIncludePath(assimp.path("contrib/unzip"));
+    lib.root_module.addIncludePath(assimp.path("contrib/zlib"));
+    lib.root_module.addIncludePath(assimp.path("contrib/openddlparser/include"));
 
-    lib.defineCMacro("RAPIDJSON_HAS_STDSTRING", "1");
+    lib.root_module.addCMacro("RAPIDJSON_HAS_STDSTRING", "1");
 
     lib.installConfigHeader(config_h);
     lib.installHeadersDirectory(
@@ -69,14 +72,14 @@ pub fn build(b: *std.Build) !void {
         .{ .include_extensions = &.{ ".h", ".inl", ".hpp" } },
     );
 
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .root = assimp.path(""),
         .files = &sources.common,
         .flags = &.{},
     });
 
     inline for (comptime std.meta.declarations(sources.libraries)) |ext_lib| {
-        lib.addCSourceFiles(.{
+        lib.root_module.addCSourceFiles(.{
             .root = assimp.path(""),
             .files = &@field(sources.libraries, ext_lib.name),
             .flags = &.{},
@@ -86,7 +89,7 @@ pub fn build(b: *std.Build) !void {
     var enable_all = false;
     var enabled_formats = std.BufSet.init(b.allocator);
     defer enabled_formats.deinit();
-    var tokenizer = std.mem.tokenize(u8, formats, ",");
+    var tokenizer = std.mem.tokenizeScalar(u8, formats, ',');
     while (tokenizer.next()) |format| {
         if (std.mem.eql(u8, format, "all")) {
             enable_all = true;
@@ -114,36 +117,38 @@ pub fn build(b: *std.Build) !void {
         const enabled = enable_all or enabled_formats.contains(format_files.name);
 
         if (enabled) {
-            lib.addCSourceFiles(.{
+            lib.root_module.addCSourceFiles(.{
                 .root = assimp.path(""),
                 .files = &@field(sources.formats, format_files.name),
                 .flags = &.{},
             });
         } else {
-            const define_importer = b.fmt("ASSIMP_BUILD_NO_{}_IMPORTER", .{fmtUpperCase(format_files.name)});
-            const define_exporter = b.fmt("ASSIMP_BUILD_NO_{}_EXPORTER", .{fmtUpperCase(format_files.name)});
+            const define_importer = b.fmt("ASSIMP_BUILD_NO_{f}_IMPORTER", .{fmtUpperCase(format_files.name)});
+            const define_exporter = b.fmt("ASSIMP_BUILD_NO_{f}_EXPORTER", .{fmtUpperCase(format_files.name)});
 
-            lib.defineCMacro(define_importer, null);
-            lib.defineCMacro(define_exporter, null);
+            lib.root_module.addCMacro(define_importer, "");
+            lib.root_module.addCMacro(define_exporter, "");
         }
     }
 
     for (unsupported_formats) |unsupported_format| {
-        const define_importer = b.fmt("ASSIMP_BUILD_NO_{}_IMPORTER", .{fmtUpperCase(unsupported_format)});
-        const define_exporter = b.fmt("ASSIMP_BUILD_NO_{}_EXPORTER", .{fmtUpperCase(unsupported_format)});
+        const define_importer = b.fmt("ASSIMP_BUILD_NO_{f}_IMPORTER", .{fmtUpperCase(unsupported_format)});
+        const define_exporter = b.fmt("ASSIMP_BUILD_NO_{f}_EXPORTER", .{fmtUpperCase(unsupported_format)});
 
-        lib.defineCMacro(define_importer, null);
-        lib.defineCMacro(define_exporter, null);
+        lib.root_module.addCMacro(define_importer, "");
+        lib.root_module.addCMacro(define_exporter, "");
     }
 
     b.installArtifact(lib);
 
     const example_cpp = b.addExecutable(.{
         .name = "static-example-cpp",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-    example_cpp.addCSourceFiles(.{
+    example_cpp.root_module.addCSourceFiles(.{
         .files = &[_][]const u8{"src/example.cpp"},
         .flags = &[_][]const u8{"-std=c++17"},
     });
@@ -152,28 +157,30 @@ pub fn build(b: *std.Build) !void {
     if (target.result.abi != .msvc) {
         example_cpp.linkLibCpp();
     }
-    example_cpp.addIncludePath(assimp.path("include"));
+    example_cpp.root_module.addIncludePath(assimp.path("include"));
     if (target.result.os.tag == .windows) {
-        example_cpp.defineCMacro("_WINDOWS", null);
-        example_cpp.defineCMacro("_WIN32", null);
+        example_cpp.root_module.addCMacro("_WINDOWS", "");
+        example_cpp.root_module.addCMacro("_WIN32", "");
     }
     b.installArtifact(example_cpp);
 
     const example_c = b.addExecutable(.{
         .name = "static-example-c",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-    example_c.addCSourceFiles(.{
+    example_c.root_module.addCSourceFiles(.{
         .files = &[_][]const u8{"src/example.c"},
         .flags = &[_][]const u8{"-std=c99"},
     });
     example_c.linkLibrary(lib);
     example_c.linkLibC();
-    example_c.addIncludePath(assimp.path("include"));
+    example_c.root_module.addIncludePath(assimp.path("include"));
     if (target.result.os.tag == .windows) {
-        example_c.defineCMacro("_WINDOWS", null);
-        example_c.defineCMacro("_WIN32", null);
+        example_c.root_module.addCMacro("_WINDOWS", "");
+        example_c.root_module.addCMacro("_WIN32", "");
     }
     b.installArtifact(example_c);
 }
@@ -574,23 +581,18 @@ const sources = struct {
     };
 };
 
-const UpperCaseFormatter = std.fmt.Formatter(struct {
-    pub fn format(
-        string: []const u8,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
-        _ = fmt;
-        _ = options;
-
-        var tmp: [256]u8 = undefined;
-        var i: usize = 0;
-        while (i < string.len) : (i += tmp.len) {
-            try writer.writeAll(std.ascii.upperString(&tmp, string[i..@min(string.len, i + tmp.len)]));
+const UpperCaseFormatter = std.fmt.Alt(
+    []const u8,
+    struct {
+        pub fn format(string: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            var tmp: [256]u8 = undefined;
+            var i: usize = 0;
+            while (i < string.len) : (i += tmp.len) {
+                try writer.writeAll(std.ascii.upperString(&tmp, string[i..@min(string.len, i + tmp.len)]));
+            }
         }
-    }
-}.format);
+    }.format,
+);
 
 fn fmtUpperCase(string: []const u8) UpperCaseFormatter {
     return UpperCaseFormatter{ .data = string };
