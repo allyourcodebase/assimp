@@ -14,7 +14,7 @@
     .dependencies = .{
         .assimp = .{
             .url = "https://github.com/assimp/assimp/archive/v5.3.1.tar.gz",
-            .hash = "1220aaf8926d1c86fe87b4ddf85159f87803d563a9bf583f565df0d3e0b289488a79",
+            .hash = "N-V-__8AACI1agiq-JJtHIb-h7Td-FFZ-HgD1WOpv1g_Vl3w",
         },
     },
 }
