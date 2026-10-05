@@ -1,14 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
-const zig_version = builtin.zig_version;
-fn lazy_from_path(path_chars: []const u8, owner: *std.Build) std.Build.LazyPath {
-    if (zig_version.major > 0 or zig_version.minor >= 13) {
-        return std.Build.LazyPath{ .src_path = .{ .sub_path = path_chars, .owner = owner } };
-    } else if (zig_version.minor >= 12) {
-        return std.Build.LazyPath{ .path = path_chars };
-    } else unreachable;
-}
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -32,9 +22,9 @@ pub fn build(b: *std.Build) !void {
         lib.root_module.addCMacro("OPENDDL_STATIC_LIBARY", "");
     }
 
-    lib.linkLibC();
+    lib.root_module.link_libc = true;
     if (target.result.abi != .msvc) {
-        lib.linkLibCpp();
+        lib.root_module.link_libcpp = true;
     }
 
     const config_h = b.addConfigHeader(
@@ -46,7 +36,7 @@ pub fn build(b: *std.Build) !void {
     );
     lib.root_module.addConfigHeader(config_h);
     lib.root_module.addIncludePath(assimp.path("include"));
-    lib.root_module.addIncludePath(lazy_from_path("include", b));
+    lib.root_module.addIncludePath(b.path("include"));
 
     lib.root_module.addIncludePath(assimp.path(""));
     lib.root_module.addIncludePath(assimp.path("contrib"));
@@ -56,6 +46,7 @@ pub fn build(b: *std.Build) !void {
     lib.root_module.addIncludePath(assimp.path("contrib/unzip"));
     lib.root_module.addIncludePath(assimp.path("contrib/zlib"));
     lib.root_module.addIncludePath(assimp.path("contrib/openddlparser/include"));
+    lib.root_module.addIncludePath(assimp.path("contrib/utf8cpp/source"));
 
     lib.root_module.addCMacro("RAPIDJSON_HAS_STDSTRING", "1");
 
@@ -67,7 +58,7 @@ pub fn build(b: *std.Build) !void {
     );
 
     lib.installHeadersDirectory(
-        lazy_from_path("include", b),
+        b.path("include"),
         "",
         .{ .include_extensions = &.{ ".h", ".inl", ".hpp" } },
     );
@@ -81,7 +72,7 @@ pub fn build(b: *std.Build) !void {
     inline for (comptime std.meta.declarations(sources.libraries)) |ext_lib| {
         lib.root_module.addCSourceFiles(.{
             .root = assimp.path(""),
-            .files = &@field(sources.libraries, ext_lib.name),
+            .files = &@field(sources.libraries, ext_lib),
             .flags = &.{},
         });
     }
@@ -98,7 +89,7 @@ pub fn build(b: *std.Build) !void {
 
         var found: bool = false;
         inline for (comptime std.meta.declarations(sources.formats)) |format_files| {
-            if (std.mem.eql(u8, format_files.name, format)) {
+            if (std.mem.eql(u8, format_files, format)) {
                 try enabled_formats.insert(format);
                 found = true;
             }
@@ -107,24 +98,24 @@ pub fn build(b: *std.Build) !void {
             std.debug.print("Unsupported format: {s}\n", .{format});
             std.debug.print("Supported formats:\n", .{});
             inline for (comptime std.meta.declarations(sources.formats)) |format_files| {
-                std.debug.print("    {s}\n", .{format_files.name});
+                std.debug.print("    {s}\n", .{format_files});
             }
             return error.InvalidFormat;
         }
     }
 
     inline for (comptime std.meta.declarations(sources.formats)) |format_files| {
-        const enabled = enable_all or enabled_formats.contains(format_files.name);
+        const enabled = enable_all or enabled_formats.contains(format_files);
 
         if (enabled) {
             lib.root_module.addCSourceFiles(.{
                 .root = assimp.path(""),
-                .files = &@field(sources.formats, format_files.name),
+                .files = &@field(sources.formats, format_files),
                 .flags = &.{},
             });
         } else {
-            const define_importer = b.fmt("ASSIMP_BUILD_NO_{f}_IMPORTER", .{fmtUpperCase(format_files.name)});
-            const define_exporter = b.fmt("ASSIMP_BUILD_NO_{f}_EXPORTER", .{fmtUpperCase(format_files.name)});
+            const define_importer = b.fmt("ASSIMP_BUILD_NO_{f}_IMPORTER", .{fmtUpperCase(format_files)});
+            const define_exporter = b.fmt("ASSIMP_BUILD_NO_{f}_EXPORTER", .{fmtUpperCase(format_files)});
 
             lib.root_module.addCMacro(define_importer, "");
             lib.root_module.addCMacro(define_exporter, "");
@@ -152,10 +143,10 @@ pub fn build(b: *std.Build) !void {
         .files = &[_][]const u8{"src/example.cpp"},
         .flags = &[_][]const u8{"-std=c++17"},
     });
-    example_cpp.linkLibrary(lib);
-    example_cpp.linkLibC();
+    example_cpp.root_module.linkLibrary(lib);
+    example_cpp.root_module.link_libc = true;
     if (target.result.abi != .msvc) {
-        example_cpp.linkLibCpp();
+        example_cpp.root_module.link_libcpp = true;
     }
     example_cpp.root_module.addIncludePath(assimp.path("include"));
     if (target.result.os.tag == .windows) {
@@ -175,8 +166,8 @@ pub fn build(b: *std.Build) !void {
         .files = &[_][]const u8{"src/example.c"},
         .flags = &[_][]const u8{"-std=c99"},
     });
-    example_c.linkLibrary(lib);
-    example_c.linkLibC();
+    example_c.root_module.linkLibrary(lib);
+    example_c.root_module.link_libc = true;
     example_c.root_module.addIncludePath(assimp.path("include"));
     if (target.result.os.tag == .windows) {
         example_c.root_module.addCMacro("_WINDOWS", "");
